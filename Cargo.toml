@@ -1,0 +1,7 @@
+[package]
+name = "gitea-sender"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = { git = "https://git.cyclonopedia.com/guzig/actix-web", branch = "main" }
