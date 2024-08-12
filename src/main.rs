@@ -4,12 +4,12 @@ use ftp::FtpStream;
 use log::info;
 use serde::Serialize;
 use serde_json::Value;
-use std::fs::File;
+use std::collections::HashMap;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 use zip::write::FileOptions;
-use std::collections::HashMap;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -122,7 +122,16 @@ async fn webhook_handler(payload: web::Json<Value>) -> impl Responder {
             //     &zip_file_path,
             //     &remote_path,
             // ) {
-            //     Ok(_) => info!("Successfully uploaded ZIP file to FTP server"),
+            //     Ok(_) => {
+            //         info!("Successfully uploaded ZIP file to FTP server");
+
+            //         // FTP 전송 후 ZIP 파일 삭제
+            //         if fs::remove_file(&zip_file_path).is_ok() {
+            //             info!("Deleted ZIP file: {}", zip_file_path);
+            //         } else {
+            //             info!("Failed to delete ZIP file: {}", zip_file_path);
+            //         }
+            //     }
             //     Err(e) => info!("Failed to upload ZIP file to FTP server: {}", e),
             // }
         }
