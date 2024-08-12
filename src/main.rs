@@ -3,6 +3,8 @@ use env_logger;
 use log::info;
 use serde::Serialize;
 use serde_json::Value;
+use std::process::Command;
+use std::path::Path;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -18,6 +20,28 @@ async fn health() -> impl Responder {
 
 async fn webhook_handler(payload: web::Json<Value>) -> impl Responder {
     info!("Received webhook request");
+
+    // 특정 경로에 있는 git 저장소를 최신 상태로 업데이트
+    let repo_path = "./test/webhook-test"; // 여기에 실제 경로를 입력하세요
+
+    if Path::new(repo_path).exists() {
+        info!("Updating repository at {}", repo_path);
+
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("pull")
+            .output()
+            .expect("Failed to execute git pull");
+
+        if output.status.success() {
+            info!("Repository updated successfully:\n{}", String::from_utf8_lossy(&output.stdout));
+        } else {
+            info!("Failed to update repository:\n{}", String::from_utf8_lossy(&output.stderr));
+        }
+    } else {
+        info!("Repository path does not exist: {}", repo_path);
+    }
 
     // Webhook으로 전달된 JSON 데이터를 파싱하여 필요한 값을 추출
     if let Some(commits) = payload.get("commits").and_then(|c| c.as_array()) {
