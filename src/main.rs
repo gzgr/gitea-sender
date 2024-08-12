@@ -1,11 +1,11 @@
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
-use env_logger;
+use env_logger::Env;
 use ftp::FtpStream;
-use log::info;
+use log::{info, LevelFilter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs::{self, File};
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
@@ -163,12 +163,38 @@ fn send_via_ftp(
     Ok(())
 }
 
+fn init_logger() {
+    // 오늘 날짜를 기준으로 로그 파일 이름 생성
+    let log_file_name = format!(
+        "webhook_log_{}.txt",
+        chrono::Local::now().format("%Y-%m-%d")
+    );
+    let log_file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(log_file_name)
+        .unwrap();
+
+    // env_logger 설정
+    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+        .format(move |buf, record| {
+            writeln!(
+                buf,
+                "{} [{}] - {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                record.level(),
+                record.args()
+            )
+        })
+        .target(env_logger::Target::Pipe(Box::new(log_file)))
+        .filter(None, LevelFilter::Info)
+        .init();
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // 로깅 초기화 및 로그 레벨 설정
-    env_logger::Builder::from_default_env()
-        .filter(None, log::LevelFilter::Info)
-        .init();
+    
+    init_logger();
 
     HttpServer::new(|| {
         App::new()
