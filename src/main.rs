@@ -3,8 +3,13 @@ use env_logger;
 use log::info;
 use serde::Serialize;
 use serde_json::Value;
-use std::process::Command;
+use std::fs;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::Path;
+use std::process::Command;
+use zip::write::FileOptions;
+use ftp::FtpStream;
 
 #[derive(Serialize)]
 struct HealthResponse {
@@ -35,31 +40,92 @@ async fn webhook_handler(payload: web::Json<Value>) -> impl Responder {
             .expect("Failed to execute git pull");
 
         if output.status.success() {
-            info!("Repository updated successfully:\n{}", String::from_utf8_lossy(&output.stdout));
+            info!(
+                "Repository updated successfully:\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
         } else {
-            info!("Failed to update repository:\n{}", String::from_utf8_lossy(&output.stderr));
+            info!(
+                "Failed to update repository:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     } else {
         info!("Repository path does not exist: {}", repo_path);
     }
 
-    // Webhook으로 전달된 JSON 데이터를 파싱하여 필요한 값을 추출
+    // 변경된 파일들을 모아 ZIP으로 압축
     if let Some(commits) = payload.get("commits").and_then(|c| c.as_array()) {
+        let mut files_to_zip = Vec::new();
+
         for commit in commits {
             if let Some(added_files) = commit.get("added").and_then(|a| a.as_array()) {
-                let added_files_vec: Vec<String> = added_files
-                    .iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect();
-
-                // 추출한 벡터를 로그로 출력
-                info!("Added files: {:?}", added_files_vec);
+                for file in added_files {
+                    if let Some(file_path) = file.as_str() {
+                        let full_path = format!("{}/{}", repo_path, file_path);
+                        files_to_zip.push((file_path.to_string(), full_path));
+                    }
+                }
             }
         }
+
+        let zip_file_path = "changed_files.zip"; // ZIP 파일을 저장할 경로
+        let zip_file = File::create(zip_file_path).expect("Could not create ZIP file");
+        let mut zip = zip::ZipWriter::new(zip_file);
+
+        for (original_path, full_path) in files_to_zip {
+            if Path::new(&full_path).exists() {
+                let options =
+                    FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+                zip.start_file(&original_path, options)
+                    .expect("Could not start file in ZIP");
+
+                let mut file = File::open(&full_path).expect("Could not open file to add to ZIP");
+                let mut buffer = Vec::new();
+                file.read_to_end(&mut buffer).expect("Could not read file");
+                zip.write_all(&buffer).expect("Could not write file to ZIP");
+            }
+        }
+
+        zip.finish().expect("Could not finish ZIP file");
+        info!("Created ZIP file at {}", zip_file_path);
+    }
+
+    // ZIP 파일을 FTP 서버로 전송
+    let ftp_server = "ftp.example.com"; // FTP 서버 주소
+    let ftp_username = "your_username"; // FTP 사용자명
+    let ftp_password = "your_password"; // FTP 비밀번호
+    let remote_path = "/remote/path/changed_files.zip"; // FTP 서버에 저장할 경로
+
+    match send_via_ftp(ftp_server, ftp_username, ftp_password, zip_file_path, remote_path) {
+        Ok(_) => info!("Successfully uploaded ZIP file to FTP server"),
+        Err(e) => info!("Failed to upload ZIP file to FTP server: {}", e),
     }
 
     // 요청에 대해 HTTP 200 OK 응답
     HttpResponse::Ok().body("Webhook processed")
+}
+
+fn send_via_ftp(
+    server: &str,
+    username: &str,
+    password: &str,
+    local_file_path: &str,
+    remote_file_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ftp_stream = FtpStream::connect(server)?;
+    ftp_stream.login(username, password)?;
+
+    // 파일 전송을 위한 바이너리 모드 전환
+    ftp_stream.transfer_type(ftp::types::FileType::Binary)?;
+
+    // 로컬 파일을 읽어 FTP 서버에 업로드
+    let mut file = File::open(local_file_path)?;
+    ftp_stream.put(remote_file_path, &mut file)?;
+
+    // FTP 세션 종료
+    ftp_stream.quit()?;
+    Ok(())
 }
 
 #[actix_web::main]
